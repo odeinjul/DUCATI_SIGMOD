@@ -7,14 +7,13 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.distributed as dist
-from mylog import get_logger
-
-mlog = get_logger()
+import os
 
 import DUCATI
 from models import SAGE, compute_acc
 from load_graph import load_dc_realtime_process
 from common import set_random_seeds
+from shm import ShmManager
 
 torch.manual_seed(25)
 
@@ -66,7 +65,7 @@ class SeedGenerator(object):
 def run(rank, world_size, data, args):
     device = torch.cuda.current_device()
     # Unpack data
-    graph, train_nid, counts, metadata = data
+    train_nid, metadata, graph = data
     num_train_per_gpu = (train_nid.numel() + args.num_trainers -
                          1) // args.num_trainers
     local_train_nid = train_nid[rank * num_train_per_gpu:(rank + 1) *
@@ -80,7 +79,7 @@ def run(rank, world_size, data, args):
 
     # feature
     gpu_flag, gpu_map, all_cache = DUCATI.CacheConstructor.form_nfeat_cache(
-        args, graph, counts)
+        args, graph)
     # prepare a buffer for feature
     input_nodes, _, _ = sampler.sample(
         graph, local_train_nid[torch.randperm(
@@ -326,8 +325,59 @@ def run(rank, world_size, data, args):
         print(timetable)
 
 
-# usage: torchrun --nproc_per_node ${num_trainers} train_ducati_graphsage.py [args]
+def main(args):
+    dist.init_process_group(backend="nccl")
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    assert world_size == args.num_trainers
+    omp_thread_num = os.cpu_count() // args.num_trainers
+    torch.cuda.set_device(rank)
+    torch.set_num_threads(omp_thread_num)
+    print("Set device to {} and cpu threads num {}".format(
+        rank, omp_thread_num))
+    set_random_seeds(0)
 
+    shm_manager = ShmManager(rank,
+                             args.num_trainers,
+                             args.root,
+                             args.dataset,
+                             pin_memory=True)
+    if args.dataset == "friendster":
+        with_feature = False
+        feat_dtype = torch.float32
+    elif args.dataset == "mag240M":
+        with_feature = False
+        feat_dtype = torch.float16
+    elif args.dataset == "ogbn-papers100M":
+        with_feature = False
+        feat_dtype = torch.float32
+    else:
+        with_feature = True
+    g, metadata = shm_manager.load_dataset(with_feature=with_feature,
+                                           with_test=False,
+                                           with_valid=False)
+    if not with_feature:
+        if shm_manager._is_chief:
+            fake_feat = torch.randn(
+                (metadata["num_nodes"], ),
+                dtype=feat_dtype).reshape(-1,
+                                          1).repeat(1, metadata["feature_dim"])
+            g["features"] = shm_manager.create_shm_tensor(
+                args.dataset + "_shm_features", feat_dtype, fake_feat.shape)
+            g["features"].copy_(fake_feat)
+            del fake_feat
+        else:
+            g["features"] = shm_manager.create_shm_tensor(
+                args.dataset + "_shm_features", None, None)
+    dist.barrier()
+    train_nid = g["train_idx"]
+    print("start")
+    data = train_nid, metadata, g
+
+    run(rank, world_size, data, args)
+
+
+# usage: torchrun --nproc_per_node ${num_trainers} train_ducati_graphsage.py [args]
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser(
         "Train nodeclassification GraphSAGE model")
@@ -359,31 +409,4 @@ if __name__ == '__main__':
     argparser.add_argument("--adj-budget", type=float, default=0)
     args = argparser.parse_args()
     print(args)
-    set_random_seeds(0)
-
-    # load graph
-    # ========== need replace ========
-    graph, n_classes = load_dc_realtime_process(args)
-    args.n_classes = n_classes
-    graph, all_data, train_nid, counts = DUCATI.CacheConstructor.separate_features_idx(
-        args, graph)
-
-    print(all_data)
-    print(counts)
-    if args.train_nid != None:
-        train_nid = torch.load(args.train_nid)
-    print("#Train nodes =", train_nid.numel())
-    train_nid = train_nid[torch.randperm(train_nid.numel())]
-    # mlog(graph)
-    data = graph, all_data, train_nid, counts
-    # ================================
-    graph = None
-    train_nid = None
-    counts = None
-    n_classes = None
-    data = graph, train_nid, counts, n_classes
-
-    # import torch.multiprocessing as mp
-    # mp.spawn(entry,
-    #          args=(args.num_trainers, args, data),
-    #          nprocs=args.num_trainers)
+    main()

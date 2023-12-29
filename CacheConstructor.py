@@ -8,11 +8,12 @@ from mylog import get_logger
 mlog = get_logger()
 
 
-def form_nfeat_cache(args, graph, nfeat_counts):
+def form_nfeat_cache(args, graph):
     if args.nfeat_budget == 0:
         return None, None, [None, None]
 
     # get probs and order
+    nfeat_counts = graph["feat_hotness"]
     nfeat_probs = nfeat_counts / nfeat_counts.sum()
     nfeat_probs, nfeat_order = nfeat_probs.sort(descending=True)
 
