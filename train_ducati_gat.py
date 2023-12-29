@@ -385,6 +385,9 @@ def main(args):
                 args.dataset + "_shm_features", None, None)
     dist.barrier()
     train_nid = torch.nonzero(g.pop("train_idx")).flatten()
+    train_nid = train_nid[torch.randperm(train_nid.shape[0])]
+    g["labels"][torch.isnan(g["labels"])] = 0
+    g["labels"] = g["labels"].long()
     print("start")
     data = train_nid, metadata, g, dgl_g
 

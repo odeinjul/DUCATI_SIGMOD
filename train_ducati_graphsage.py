@@ -84,7 +84,7 @@ def run(rank, world_size, data, args):
     input_nodes, _, _ = sampler.sample(
         dgl_g, local_train_nid[torch.randperm(
             local_train_nid.shape[0])][:args.batch_size])
-    estimate_max_batch = int(input_nodes.shape[0] * 1.2)
+    estimate_max_batch = int(input_nodes.shape[0] * 1.5)
     nfeat_buf = torch.zeros((estimate_max_batch, metadata["feature_dim"]),
                             dtype=torch.float).cuda()
     label_buf = torch.zeros((args.batch_size, ), dtype=torch.long).cuda()
@@ -378,6 +378,9 @@ def main(args):
                 args.dataset + "_shm_features", None, None)
     dist.barrier()
     train_nid = torch.nonzero(g.pop("train_idx")).flatten()
+    train_nid = train_nid[torch.randperm(train_nid.shape[0])]
+    g["labels"][torch.isnan(g["labels"])] = 0
+    g["labels"] = g["labels"].long()
     print("start")
     data = train_nid, metadata, g, dgl_g
 
