@@ -10,6 +10,7 @@ from dgl.convert import from_scipy
 from dgl.data.utils import generate_mask_tensor
 from sklearn.preprocessing import StandardScaler
 from scipy import sparse as sp
+import bifeat
 
 from common import set_random_seeds, fast_reorder
 from mylog import get_logger
@@ -18,25 +19,37 @@ mlog = get_logger()
 root_dir = "./preprocess"
 
 def load_graph_all_data(args):
+    shm_manager = bifeat.shm.ShmManager(0,
+                                        1,
+                                        args.root,
+                                        args.dataset,
+                                        pin_memory=True)
+    
+    graph_tensors, meta_data = shm_manager.load_dataset(with_feature=True, with_valid=False, with_test=False)
+    # single gpu
+    
     # graph_tensors, meta_data
     indptr, indices = graph_tensors['indptr'], graph_tensors['indices']
     n_classes = meta_data["num_classes"]
     num_nodes = meta_data["num_nodes"]
     graph = dgl.graph(('csc', (indptr, indices, torch.tensor([]))), num_nodes=num_nodes)
     
+    graph = graph.formats(['csc'])
+    
     train_idx = torch.nonzero(graph_tensors["train_idx"]).reshape(-1)
     adj_counts = graph_tensors["labels"]
-    nfeat_counts =graph_tensors["features"]
+    nfeat_counts = graph_tensors["features"]
 
     # cleanup # maybe can remove
     graph.ndata.clear()
     graph.edata.clear()
-
+    
+    separate_tic = time.time()
     # we prepare fake input for all datasets
     fake_nfeat = dgl.contrib.UnifiedTensor(torch.rand((graph.num_nodes(), args.fake_dim), dtype=torch.float), device='cuda')
     fake_label = dgl.contrib.UnifiedTensor(torch.randint(n_classes, (graph.num_nodes(), ), dtype=torch.long), device='cuda')
-
     mlog(f'finish generating random features with dim={args.fake_dim}, time elapsed: {time.time()-separate_tic:.2f}s')
+    print(indptr)
     return graph, [fake_nfeat, fake_label], train_idx, [adj_counts, nfeat_counts], n_classes
 
 

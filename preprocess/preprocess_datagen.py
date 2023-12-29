@@ -11,8 +11,8 @@ import tqdm
 import time
 
 
-def process_products_with_reorder(dataset_path, save_path):
-    print("Process ogbn-products...")
+def process_products_with_reorder(args, dataset_path, save_path):
+    print(f"Process {args.dataset}...")
 
     print("Read data...")
     meta_data = torch.load(os.path.join(dataset_path, "metadata.pt"))
@@ -63,13 +63,13 @@ def process_products_with_reorder(dataset_path, save_path):
     torch.save(indices.long(), os.path.join(save_path, "indices.pt"))
     torch.save(train_idx.long(), os.path.join(save_path, "train_idx.pt"))
     torch.save(adj_counts.long(), os.path.join(save_path, "labels.pt")) # label - adj_counts
-    torch.save(nfeat_counts.long(), os.path.join(save_path, "features.pt"))  # features - adj_counts
+    torch.save(nfeat_counts.long(), os.path.join(save_path, "features.pt"))  # features - nfeat_counts
     
     num_train_nodes = train_idx.shape[0]
 
     print("Save meta data...")
     meta_data = {
-        "dataset": "ogbn-products",
+        "dataset": args.dataset,
         "num_nodes": graph.num_nodes(),
         "num_edges": graph.num_edges(),
         "num_classes": n_classes,
@@ -154,26 +154,8 @@ if __name__ == '__main__':
         choices=["ogbn-products", "ogbn-papers100M", "mag240M", "friendster"])
     parser.add_argument("--root", help="Path of the dataset.")
     parser.add_argument("--save-path", help="Path to save the processed data.")
-    parser.add_argument("--dgl-graph", action="store_true", default=False)
+    parser.add_argument("--dgl-graph", action="store_true", default=True)
     args = parser.parse_args()
     print(args)
 
-    if args.dgl_graph:
-        if args.dataset == "ogbn-papers100M":
-            process_papers_from_dgl_graph(args.root, args.save_path)
-        elif args.dataset == "ogbn-products":
-            process_products_with_reorder(args.root, args.save_path)
-        elif args.dataset == "mag240M":
-            process_mag240M_from_dgl_graph(args.root, args.save_path)
-        elif args.dataset == "friendster":
-            process_friendster_from_dgl_graph(args.root, args.save_path)
-
-    else:
-        if args.dataset == "ogbn-papers100M":
-            process_papers100M(args.root, args.save_path)
-        elif args.dataset == "ogbn-products":
-            process_products(args.root, args.save_path)
-        elif args.dataset == "mag240M":
-            process_mag240M(args.root, args.save_path)
-        elif args.dataset == "friendster":
-            process_friendster(args.root, args.save_path)
+    process_products_with_reorder(args, args.root, args.save_path)
