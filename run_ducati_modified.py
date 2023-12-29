@@ -1,12 +1,15 @@
+import os
 import dgl
 import time
 import torch
 import random
+import bifeat
 import argparse
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from torch import distributed as dist
 import tqdm
 
 from mylog import get_logger
@@ -14,16 +17,18 @@ mlog = get_logger()
 
 import DUCATI
 from model import SAGE
-from load_graph import load_dc_realtime_process
+from load_graph import load_dc_realtime_process, load_graph_all_data
 from common import set_random_seeds, get_seeds_list
 
 def entry(args, graph, all_data, seeds_list, counts):
+    mlog(f"Start training")
     fanouts = [int(x) for x in args.fanouts.split(",")]
     cached_indptr, cached_indices = DUCATI.CacheConstructor.form_adj_cache(args, graph, counts)
     sampler = DUCATI.NeighborSampler(cached_indptr, cached_indices, fanouts)
     gpu_flag, gpu_map, all_cache, _ = DUCATI.CacheConstructor.form_nfeat_cache(args, all_data, counts)
 
     # prepare a buffer
+    mlog(f"Prepare Buffer")
     input_nodes, _, _ = sampler.sample(graph, seeds_list[0])
     estimate_max_batch = int(1.2*input_nodes.shape[0])
     nfeat_buf = torch.zeros((estimate_max_batch, args.fake_dim), dtype=torch.float).cuda()
@@ -74,7 +79,10 @@ if __name__ == '__main__':
 
     # dataset params
     parser.add_argument("--dataset", type=str, choices=['ogbn-papers100M', "ogbn-products", 'uk', 'uk-union', 'twitter'],
-                        default='ogbn-papers100M')
+                        default='ogbn-products')
+    parser.add_argument("--root",
+                           type=str,
+                           default="./preprocess/ogbn_products/")
     parser.add_argument("--pre-epochs", type=int, default=2) # PreSC params
 
     # running params
@@ -94,18 +102,55 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     mlog(args)
+    dist.init_process_group('nccl',
+                            'tcp://127.0.0.1:12347',
+                            world_size=1,
+                            rank=0)
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    print("{} of {}".format(rank, world_size))
+
+    omp_thread_num = os.cpu_count() // world_size
+    torch.cuda.set_device(rank)
+    torch.set_num_threads(omp_thread_num)
+    print("Set device to {} and cpu threads num {}".format(
+        rank, omp_thread_num))
+    
     set_random_seeds(0)
 
     # DUCATI
-    graph, all_data, train_idx, counts, n_classes = load_graph_all_data(args)
-    args.n_classes = n_classes
+    ### LOAD
+    shm_manager = bifeat.shm.ShmManager(0, 1, args.root, args.dataset, pin_memory=True)
+    graph_tensors, meta_data = shm_manager.load_dataset(with_feature=True, with_valid=False, with_test=False)
+    indptr, indices = graph_tensors['indptr'], graph_tensors['indices']
+    n_classes = meta_data["num_classes"]
+    num_nodes = meta_data["num_nodes"]
+    graph = dgl.graph(('csc', (indptr, indices, torch.tensor([]))), num_nodes=num_nodes)
+    graph = graph.formats(['csc'])
+    train_idx = torch.nonzero(graph_tensors["train_idx"]).reshape(-1)
+    adj_counts = graph_tensors["labels"]
+    nfeat_counts = graph_tensors["features"]
+    # cleanup # maybe can remove
+    graph.ndata.clear()
+    graph.edata.clear()
+    separate_tic = time.time()
+    # we prepare fake input for all datasets
+    fake_nfeat = dgl.contrib.UnifiedTensor(torch.rand((graph.num_nodes(), args.fake_dim), dtype=torch.float), device='cuda')
+    fake_label = dgl.contrib.UnifiedTensor(torch.randint(n_classes, (graph.num_nodes(), ), dtype=torch.long), device='cuda')
+    mlog(f'finish generating random features with dim={args.fake_dim}, time elapsed: {time.time()-separate_tic:.2f}s')
+    ### LOAD
     
+    all_data = [fake_nfeat, fake_label]
+    counts = [adj_counts, nfeat_counts]
+    
+    print(indptr)
+    args.n_classes = n_classes
     train_idx = train_idx.cuda()
-    graph.pin_memory_()
+    # graph.pin_memory_()
     mlog(graph)
 
     # get seeds candidate
     seeds_list = get_seeds_list(args, train_idx)
-    del train_idx
+    # del train_idx
     
     entry(args, graph, all_data, seeds_list, counts)

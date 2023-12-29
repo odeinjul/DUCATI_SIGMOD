@@ -1,1 +1,0 @@
-python preprocess_datagen.py --dataset "ogbn-products" --root "../../processed_dataset/ogbn-products" --save-path  "./ogbn-products" --dgl-graph
