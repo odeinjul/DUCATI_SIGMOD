@@ -10,7 +10,7 @@ import torch.distributed as dist
 import os
 
 import DUCATI
-from models import SAGE, compute_acc
+from models import GAT, compute_acc
 from common import set_random_seeds
 from shm import ShmManager
 
@@ -94,8 +94,15 @@ def run(rank, world_size, data, args):
                                       gpu_flag)
 
     # Define model and optimizer
-    model = SAGE(metadata["feature_dim"], args.num_hidden,
-                 metadata["num_classes"], len(fan_out), F.relu, args.dropout)
+    gat_heads = [int(head) for head in args.heads.split(",")]
+    model = GAT(metadata["feature_dim"],
+                args.num_hidden,
+                metadata["num_classes"],
+                len(fan_out),
+                gat_heads,
+                activation=F.relu,
+                feat_dropout=args.feat_dropout,
+                attn_dropout=args.attn_dropout)
     model = model.to(device)
     model = nn.parallel.DistributedDataParallel(model,
                                                 device_ids=[rank],
@@ -403,13 +410,15 @@ if __name__ == '__main__':
         "number of trainers participated in the compress, no greater than available GPUs num"
     )
     argparser.add_argument("--lr", type=float, default=0.003)
-    argparser.add_argument("--dropout", type=float, default=0.2)
+    argparser.add_argument("--heads", type=str, default="4,4,1")
+    argparser.add_argument("--feat_dropout", type=float, default=0.2)
+    argparser.add_argument("--attn_dropout", type=float, default=0.2)
     argparser.add_argument("--batch-size", type=int, default=1000)
     argparser.add_argument("--batch-size-eval", type=int, default=100000)
     argparser.add_argument("--log-every", type=int, default=20)
     argparser.add_argument("--eval-every", type=int, default=21)
     argparser.add_argument("--fan-out", type=str, default="12,12,12")
-    argparser.add_argument("--num-hidden", type=int, default=32)
+    argparser.add_argument("--num-hidden", type=int, default=8)
     argparser.add_argument("--num-epochs", type=int, default=20)
     argparser.add_argument("--breakdown", action="store_true", default=False)
     argparser.add_argument("--nfeat-budget", type=float, default=0)
