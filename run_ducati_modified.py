@@ -97,9 +97,9 @@ if __name__ == '__main__':
     set_random_seeds(0)
 
     # DUCATI
-    graph, n_classes = load_dc_realtime_process(args)
+    graph, all_data, train_idx, counts, n_classes = load_graph_all_data(args)
     args.n_classes = n_classes
-    graph, all_data, train_idx, counts = DUCATI.CacheConstructor.separate_features_idx(args, graph)
+    
     train_idx = train_idx.cuda()
     graph.pin_memory_()
     mlog(graph)
@@ -107,5 +107,5 @@ if __name__ == '__main__':
     # get seeds candidate
     seeds_list = get_seeds_list(args, train_idx)
     del train_idx
-
+    
     entry(args, graph, all_data, seeds_list, counts)

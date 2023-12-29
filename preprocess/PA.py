@@ -31,10 +31,10 @@ def load_ogb(name, root='.'):
     print(f"finish loading {name}, time elapsed: {time.time() - tic:.2f}s")
     return graph, num_labels
 
-name = 'ogbn-papers100M'
-graph, _ = load_ogb(name=name, root='/home/data/USERNAME/datasets')
+name = 'ogbn-products'
+graph, _ = load_ogb(name=name, root='/home/ubuntu/workspace/DUCATI_SIGMOD/datasets')
 mask = graph.ndata.pop('train_mask')
 indptr, indices, _ = graph.adj_sparse(fmt='csc')
 new_graph = dgl.graph(('csc', (indptr, indices, th.tensor([]))), num_nodes=graph.num_nodes())
-new_graph.ndata['train_mask'] = mask
+new_graph.ndata['train_mask'] = mask    
 dgl.save_graphs(f'dgl_{name}.bin', [new_graph])

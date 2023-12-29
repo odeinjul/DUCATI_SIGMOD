@@ -17,8 +17,31 @@ mlog = get_logger()
 
 root_dir = "./preprocess"
 
+def load_graph_all_data(args):
+    # graph_tensors, meta_data
+    indptr, indices = graph_tensors['indptr'], graph_tensors['indices']
+    n_classes = meta_data["num_classes"]
+    num_nodes = meta_data["num_nodes"]
+    graph = dgl.graph(('csc', (indptr, indices, torch.tensor([]))), num_nodes=num_nodes)
+    
+    train_idx = torch.nonzero(graph_tensors["train_idx"]).reshape(-1)
+    adj_counts = graph_tensors["labels"]
+    nfeat_counts =graph_tensors["features"]
+
+    # cleanup # maybe can remove
+    graph.ndata.clear()
+    graph.edata.clear()
+
+    # we prepare fake input for all datasets
+    fake_nfeat = dgl.contrib.UnifiedTensor(torch.rand((graph.num_nodes(), args.fake_dim), dtype=torch.float), device='cuda')
+    fake_label = dgl.contrib.UnifiedTensor(torch.randint(n_classes, (graph.num_nodes(), ), dtype=torch.long), device='cuda')
+
+    mlog(f'finish generating random features with dim={args.fake_dim}, time elapsed: {time.time()-separate_tic:.2f}s')
+    return graph, [fake_nfeat, fake_label], train_idx, [adj_counts, nfeat_counts], n_classes
+
+
 def load_dc_raw(args, coo=False):
-    assert args.dataset in ['ogbn-papers100M', 'uk', 'uk-union', 'twitter']
+    assert args.dataset in ['ogbn-papers100M', 'ogbn-products', 'uk', 'uk-union', 'twitter']
     mlog(f"loading raw dataset of {args.dataset}")
     tic = time.time()
     ds = dgl.load_graphs(f'{root_dir}/dgl_{args.dataset}.bin')[0][0]
@@ -28,6 +51,8 @@ def load_dc_raw(args, coo=False):
     mlog(f'finish loading raw dataset, time elapsed: {time.time() - tic:.2f}s')
     if args.dataset == 'ogbn-papers100M':
         n_classes = 172
+    elif args.dataset == 'ogbn-products':
+        n_classes = 47
     else:
         n_classes = 100 # other fake ds
     if coo:
