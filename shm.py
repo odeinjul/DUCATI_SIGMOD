@@ -283,6 +283,13 @@ class ShmManager(object):
                 feat_hotness.shape)
             shm_feat_hotness.copy_(feat_hotness)
 
+            adj_hotness = torch.load(
+                os.path.join(self.dataset_path, "adj_hotness.pt"))
+            shm_adj_hotness = self.create_shm_tensor(
+                self.dataset_name + "_shm_adj_hotness", adj_hotness.dtype,
+                adj_hotness.shape)
+            shm_adj_hotness.copy_(adj_hotness)
+
         else:
             shm_labels = self.create_shm_tensor(
                 self.dataset_name + "_shm_labels", None, None)
@@ -305,6 +312,8 @@ class ShmManager(object):
                     self.dataset_name + "_shm_features", None, None)
             shm_feat_hotness = self.create_shm_tensor(
                 self.dataset_name + "_shm_feat_hotness", None, None)
+            shm_adj_hotness = self.create_shm_tensor(
+                self.dataset_name + "_shm_adj_hotness", None, None)
 
         graph_tensors = {
             "labels": shm_labels,
@@ -313,6 +322,7 @@ class ShmManager(object):
             "train_idx": shm_train_idx,
             "core_idx": shm_core_idx,
             "feat_hotness": shm_feat_hotness,
+            "adj_hotness": shm_adj_hotness,
         }
         if with_valid:
             graph_tensors["valid_idx"] = shm_valid_idx
