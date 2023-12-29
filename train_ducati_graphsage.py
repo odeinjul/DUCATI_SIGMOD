@@ -65,7 +65,8 @@ class SeedGenerator(object):
 def run(rank, world_size, data, args):
     device = torch.cuda.current_device()
     # Unpack data
-    train_nid, metadata, graph = data
+    train_nid, metadata, graph, dgl_g = data
+    dgl_g.pin_memory_()
     num_train_per_gpu = (train_nid.numel() + args.num_trainers -
                          1) // args.num_trainers
     local_train_nid = train_nid[rank * num_train_per_gpu:(rank + 1) *
@@ -82,7 +83,7 @@ def run(rank, world_size, data, args):
         args, graph)
     # prepare a buffer for feature
     input_nodes, _, _ = sampler.sample(
-        graph, local_train_nid[torch.randperm(
+        dgl_g, local_train_nid[torch.randperm(
             local_train_nid.shape[0])][:args.batch_size])
     estimate_max_batch = int(input_nodes.shape[0] * 1.2)
     nfeat_buf = torch.zeros((estimate_max_batch, metadata["feature_dim"]),
@@ -143,7 +144,7 @@ def run(rank, world_size, data, args):
                 dist.barrier()
                 torch.cuda.synchronize()
             sample_begin = time.time()
-            input_nodes, seeds, blocks = sampler.sample(graph, seed_nids)
+            input_nodes, seeds, blocks = sampler.sample(dgl_g, seed_nids)
             if args.breakdown:
                 dist.barrier()
                 torch.cuda.synchronize()
@@ -161,9 +162,9 @@ def run(rank, world_size, data, args):
 
             num_inputs += torch.sum(~gpu_flag[input_nodes]).item()
             for l, block in enumerate(blocks):
-                num_layer_seeds = block.dstdata[dgl.NID]
+                layer_seeds = block.dstdata[dgl.NID]
                 uncached_seeds_num = torch.sum(
-                    num_layer_seeds >= adj_cache_num).item()
+                    layer_seeds >= adj_cache_num).item()
                 num_layer_seeds += uncached_seeds_num
                 num_layer_neighbors += uncached_seeds_num * fan_out[l]
 
@@ -341,7 +342,7 @@ def main(args):
                              args.num_trainers,
                              args.root,
                              args.dataset,
-                             pin_memory=True)
+                             pin_memory=False)
     if args.dataset == "friendster":
         with_feature = False
         feat_dtype = torch.float32
@@ -352,10 +353,12 @@ def main(args):
         with_feature = False
         feat_dtype = torch.float32
     else:
-        with_feature = True
+        with_feature = False
+        feat_dtype = torch.float32
     g, metadata = shm_manager.load_dataset(with_feature=with_feature,
                                            with_test=False,
                                            with_valid=False)
+    dgl_g = dgl.graph(('csc', (g["indptr"], g["indices"], torch.tensor([]))))
     if not with_feature:
         if shm_manager._is_chief:
             fake_feat = torch.randn(
@@ -372,7 +375,7 @@ def main(args):
     dist.barrier()
     train_nid = g["train_idx"]
     print("start")
-    data = train_nid, metadata, g
+    data = train_nid, metadata, g, dgl_g
 
     run(rank, world_size, data, args)
 
@@ -409,4 +412,4 @@ if __name__ == '__main__':
     argparser.add_argument("--adj-budget", type=float, default=0)
     args = argparser.parse_args()
     print(args)
-    main()
+    main(args)

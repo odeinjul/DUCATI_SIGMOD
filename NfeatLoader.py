@@ -1,6 +1,10 @@
+import dgl
+
+
 class NfeatLoader(object):
+
     def __init__(self, cpu_data, gpu_data, gpu_map, gpu_flag):
-        self.cpu_data = cpu_data
+        self.cpu_data = dgl.contrib.UnifiedTensor(cpu_data, device='cuda')
         self.gpu_data = gpu_data
         self.gpu_map = gpu_map
         self.gpu_flag = gpu_flag
@@ -15,4 +19,3 @@ class NfeatLoader(object):
         cur_res[gpu_mask] = self.gpu_data[gpu_local_nids]
         cur_res[~gpu_mask] = self.cpu_data[cpu_nids]
         return cur_res
-

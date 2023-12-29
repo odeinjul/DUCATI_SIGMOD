@@ -277,7 +277,7 @@ class ShmManager(object):
                 shm_features.copy_(features)
 
             feat_hotness = torch.load(
-                os.path.join(self.dataset_path, "feat_hotness.py"))
+                os.path.join(self.dataset_path, "feat_hotness.pt"))
             shm_feat_hotness = self.create_shm_tensor(
                 self.dataset_name + "_shm_feat_hotness", feat_hotness.dtype,
                 feat_hotness.shape)
