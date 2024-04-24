@@ -398,8 +398,8 @@ def main(args):
     dist.barrier()
     print(shm_train_nid)
 
-    g["labels"][torch.isnan(g["labels"])] = 0
-    g["labels"] = g["labels"].long()
+    # g["labels"][torch.isnan(g["labels"])] = 0
+    # g["labels"] = g["labels"].long()
     print("start")
     data = shm_train_nid, metadata, g, dgl_g
 

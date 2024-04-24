@@ -23,14 +23,15 @@ def process_products_with_reorder(args, dataset_path, save_path):
     #g = dgl.load_graphs(dataset_path)[0][0]
 
     print("Covert data...")
-    
-    graph = dgl.graph(('csc', (indptr, indices, torch.tensor([]))), num_nodes=meta_data["num_nodes"])
+
+    graph = dgl.graph(('csc', (indptr, indices, torch.tensor([]))),
+                      num_nodes=meta_data["num_nodes"])
     src, dst = graph.adj_tensors(fmt='coo')
     graph = graph.formats(['csc'])
     n_classes = 47
     #graph, src, dst, n_classes
     num_nodes = graph.num_nodes()
-    
+
     print("Perform sampling...")
     graph.ndata.clear()
     graph.edata.clear()
@@ -40,10 +41,10 @@ def process_products_with_reorder(args, dataset_path, save_path):
     graph.unpin_memory_()
     train_idx = train_idx.cpu()
     torch.cuda.empty_cache()
-    
+
     print("Reorder graph...")
     degs = graph.in_degrees() + 1
-    priority = adj_counts/degs
+    priority = adj_counts / degs
     adj_order = priority.argsort(descending=True)
     graph = fast_reorder((src, dst), adj_order)
     del src, dst
@@ -55,16 +56,17 @@ def process_products_with_reorder(args, dataset_path, save_path):
     train_idx = train_mask[adj_order]
     adj_counts = adj_counts[adj_order]
     nfeat_counts = nfeat_counts[adj_order]
+    labels = labels[adj_order]
     # new_graph, n_classes
-
 
     print("Save data...")
     torch.save(indptr.long(), os.path.join(save_path, "indptr.pt"))
     torch.save(indices.long(), os.path.join(save_path, "indices.pt"))
     torch.save(train_idx.long(), os.path.join(save_path, "train_idx.pt"))
-    torch.save(adj_counts.long(), os.path.join(save_path, "labels.pt")) # label - adj_counts
-    torch.save(nfeat_counts.long(), os.path.join(save_path, "features.pt"))  # features - nfeat_counts
-    
+    torch.save(labels, os.path.join(save_path, "labels.pt"))
+    torch.save(adj_counts, os.path.join(save_path, "adj_hotness.pt"))
+    torch.save(nfeat_counts, os.path.join(save_path, "feat_hotness.pt"))
+
     num_train_nodes = train_idx.shape[0]
 
     print("Save meta data...")
@@ -77,7 +79,8 @@ def process_products_with_reorder(args, dataset_path, save_path):
     }
     print(meta_data)
     torch.save(meta_data, os.path.join(save_path, "metadata.pt"))
-    
+
+
 def fast_reorder(graph, nodes_perm):
     if isinstance(graph, tuple):
         src, dst = graph
@@ -92,15 +95,17 @@ def fast_reorder(graph, nodes_perm):
     del src, dst
     return new_graph
 
+
 def my_iter(train_idx):
     pm = torch.randperm(train_idx.shape[0]).to(train_idx.device)
     local_train_idx = train_idx[pm]
     length = train_idx.shape[0] // 1000
     for i in range(length):
         st = i * 1000
-        ed = (i+1) * 1000 
+        ed = (i + 1) * 1000
         yield local_train_idx[st:ed]
-    
+
+
 def generate_stats(graph, train_idx):
     #mlog("start calculate counts")
     fanouts = [12, 12, 12]
@@ -130,17 +135,22 @@ def generate_stats(graph, train_idx):
 def process_papers100M(dataset_path, save_path):
     None
 
+
 def process_papers_from_dgl_graph(dataset_path, save_path):
     None
+
 
 def process_mag240M(dataset_path, save_path, gen_feat=False):
     None
 
+
 def process_mag240M_from_dgl_graph(dataset_path, save_path):
     None
 
+
 def process_friendster(dataset_path, save_path):
     None
+
 
 def process_friendster_from_dgl_graph(dataset_path, save_path):
     None
@@ -154,7 +164,7 @@ if __name__ == '__main__':
         choices=["ogbn-products", "ogbn-papers100M", "mag240M", "friendster"])
     parser.add_argument("--root", help="Path of the dataset.")
     parser.add_argument("--save-path", help="Path to save the processed data.")
-    parser.add_argument("--dgl-graph", action="store_true", default=True)
+    parser.add_argument("--dgl-graph", action="store_true")
     args = parser.parse_args()
     print(args)
 
