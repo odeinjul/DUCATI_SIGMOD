@@ -125,6 +125,7 @@ def run(rank, world_size, data, args):
     num_layer_seeds_log = []
     num_layer_neighbors_log = []
     num_inputs_log = []
+    iter_time_log = []
     for epoch in range(args.num_epochs):
 
         sample_time = 0
@@ -196,6 +197,7 @@ def run(rank, world_size, data, args):
                 # dist.barrier()
                 torch.cuda.synchronize()
             update_time += time.time() - update_start
+            iter_time_log.append(time.time() - sample_begin)
 
             if (it + 1) % args.log_every == 0:
                 acc = compute_acc(batch_pred, batch_labels)
@@ -261,6 +263,7 @@ def run(rank, world_size, data, args):
     avg_forward_time = np.mean(forward_time_log[2:])
     avg_backward_time = np.mean(backward_time_log[2:])
     avg_update_time = np.mean(update_time_log[2:])
+    avg_iteration_time = np.mean(iter_time_log[10:])
 
     for i in range(args.num_trainers):
         dist.barrier()
@@ -310,10 +313,15 @@ def run(rank, world_size, data, args):
     dist.all_reduce(all_reduce_tensor, dist.ReduceOp.SUM)
     all_reduce_update_time = all_reduce_tensor[0].item() / world_size
 
+    all_reduce_tensor[0] = avg_iteration_time
+    dist.all_reduce(all_reduce_tensor, dist.ReduceOp.SUM)
+    all_reduce_iteration_time = all_reduce_tensor[0].item() / world_size
+
     if rank == 0:
         timetable = ("=====================\n"
                      "All reduce time:\n"
                      "Throughput(seeds/sec): {:.4f}\n"
+                     "Iteration time(ms): {:.4f}\n"
                      "Epoch Time(s): {:.4f}\n"
                      "Sampling Time(s): {:.4f}\n"
                      "Loading Time(s): {:.4f}\n"
@@ -322,6 +330,7 @@ def run(rank, world_size, data, args):
                      "Update Time(s): {:.4f}\n"
                      "=====================".format(
                          train_nid.shape[0] / all_reduce_epoch_time,
+                         all_reduce_iteration_time * 1000,
                          all_reduce_epoch_time,
                          all_reduce_sample_time,
                          all_reduce_load_time,
@@ -398,8 +407,8 @@ def main(args):
     dist.barrier()
     print(shm_train_nid)
 
-    # g["labels"][torch.isnan(g["labels"])] = 0
-    # g["labels"] = g["labels"].long()
+    g["labels"][torch.isnan(g["labels"])] = 0
+    g["labels"] = g["labels"].long()
     print("start")
     data = shm_train_nid, metadata, g, dgl_g
 

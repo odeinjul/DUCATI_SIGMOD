@@ -20,7 +20,6 @@ def process_products_with_reorder(args, dataset_path, save_path):
     indptr = torch.load(os.path.join(dataset_path, "indptr.pt"))
     indices = torch.load(os.path.join(dataset_path, "indices.pt"))
     train_idx = torch.load(os.path.join(dataset_path, "train_idx.pt"))
-    #g = dgl.load_graphs(dataset_path)[0][0]
 
     print("Covert data...")
 
@@ -28,8 +27,6 @@ def process_products_with_reorder(args, dataset_path, save_path):
                       num_nodes=meta_data["num_nodes"])
     src, dst = graph.adj_tensors(fmt='coo')
     graph = graph.formats(['csc'])
-    n_classes = 47
-    #graph, src, dst, n_classes
     num_nodes = graph.num_nodes()
 
     print("Perform sampling...")
@@ -57,7 +54,6 @@ def process_products_with_reorder(args, dataset_path, save_path):
     adj_counts = adj_counts[adj_order]
     nfeat_counts = nfeat_counts[adj_order]
     labels = labels[adj_order]
-    # new_graph, n_classes
 
     print("Save data...")
     torch.save(indptr.long(), os.path.join(save_path, "indptr.pt"))
@@ -69,15 +65,6 @@ def process_products_with_reorder(args, dataset_path, save_path):
 
     num_train_nodes = train_idx.shape[0]
 
-    print("Save meta data...")
-    meta_data = {
-        "dataset": args.dataset,
-        "num_nodes": graph.num_nodes(),
-        "num_edges": graph.num_edges(),
-        "num_classes": n_classes,
-        "num_train_nodes": num_train_nodes
-    }
-    print(meta_data)
     torch.save(meta_data, os.path.join(save_path, "metadata.pt"))
 
 
