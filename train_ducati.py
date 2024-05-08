@@ -10,7 +10,7 @@ import torch.distributed as dist
 import os
 
 import DUCATI
-from models import GAT, compute_acc
+from models import SAGE, GAT, compute_acc
 from common import set_random_seeds
 from shm import ShmManager
 
@@ -72,12 +72,14 @@ def run(rank, world_size, data, args):
                                 num_train_per_gpu]
 
     # sampler
+    print("create sampler")
     fan_out = [int(x) for x in args.fan_out.split(",")]
     cached_indptr, cached_indices, adj_cache_num = DUCATI.CacheConstructor.form_adj_cache(
         args, graph)
     sampler = DUCATI.NeighborSampler(cached_indptr, cached_indices, fan_out)
 
     # feature
+    print("create cache")
     gpu_flag, gpu_map, all_cache = DUCATI.CacheConstructor.form_nfeat_cache(
         args, graph)
     # prepare a buffer for feature
@@ -94,15 +96,19 @@ def run(rank, world_size, data, args):
                                       gpu_flag)
 
     # Define model and optimizer
-    gat_heads = [int(head) for head in args.heads.split(",")]
-    model = GAT(metadata["feature_dim"],
-                args.num_hidden,
-                metadata["num_classes"],
-                len(fan_out),
-                gat_heads,
-                activation=F.relu,
-                feat_dropout=args.feat_dropout,
-                attn_dropout=args.attn_dropout)
+    print("create model")
+    if args.model == "sage":
+        model = SAGE(metadata["feature_dim"], args.num_hidden,
+                     metadata["num_classes"], len(fan_out), F.relu,
+                     args.dropout)
+    elif args.model == "gat":
+        heads = [args.num_heads for _ in range(len(fan_out) - 1)]
+        heads.append(1)
+        num_hidden = args.num_hidden // args.num_heads
+        model = GAT(metadata["feature_dim"], num_hidden,
+                    metadata["num_classes"], len(fan_out), heads, F.elu,
+                    args.dropout)
+
     model = model.to(device)
     model = nn.parallel.DistributedDataParallel(model,
                                                 device_ids=[rank],
@@ -110,6 +116,7 @@ def run(rank, world_size, data, args):
     loss_fcn = nn.CrossEntropyLoss()
     loss_fcn = loss_fcn.to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.978)
 
     # prepare dataloader
     dataloader = SeedGenerator(local_train_nid.cuda(),
@@ -126,6 +133,7 @@ def run(rank, world_size, data, args):
     num_layer_neighbors_log = []
     num_inputs_log = []
     iter_time_log = []
+    print("Start training")
     for epoch in range(args.num_epochs):
 
         sample_time = 0
@@ -213,7 +221,7 @@ def run(rank, world_size, data, args):
                 if rank == 0:
                     print("Avg train acc {:.4f}".format(
                         train_acc_tensor[0].item()))
-
+        scheduler.step()
         epoch_toc = time.time()
 
         for i in range(args.num_trainers):
@@ -257,12 +265,12 @@ def run(rank, world_size, data, args):
         num_layer_neighbors_log.append(num_layer_neighbors)
         num_inputs_log.append(num_inputs)
 
-    avg_epoch_time = np.mean(epoch_time_log[2:])
-    avg_sample_time = np.mean(sample_time_log[2:])
-    avg_load_time = np.mean(load_time_log[2:])
-    avg_forward_time = np.mean(forward_time_log[2:])
-    avg_backward_time = np.mean(backward_time_log[2:])
-    avg_update_time = np.mean(update_time_log[2:])
+    avg_epoch_time = np.mean(epoch_time_log[1:])
+    avg_sample_time = np.mean(sample_time_log[1:])
+    avg_load_time = np.mean(load_time_log[1:])
+    avg_forward_time = np.mean(forward_time_log[1:])
+    avg_backward_time = np.mean(backward_time_log[1:])
+    avg_update_time = np.mean(update_time_log[1:])
     avg_iteration_time = np.mean(iter_time_log[10:])
 
     for i in range(args.num_trainers):
@@ -283,9 +291,9 @@ def run(rank, world_size, data, args):
                              rank, avg_epoch_time, avg_sample_time,
                              avg_load_time, avg_forward_time,
                              avg_backward_time, avg_update_time,
-                             np.mean(num_inputs_log[2:]),
-                             np.mean(num_layer_seeds_log[2:]),
-                             np.mean(num_layer_neighbors_log[2:])))
+                             np.mean(num_inputs_log[1:]),
+                             np.mean(num_layer_seeds_log[1:]),
+                             np.mean(num_layer_neighbors_log[1:])))
             print(timetable)
     all_reduce_tensor = torch.tensor([0], device="cuda", dtype=torch.float32)
 
@@ -406,10 +414,9 @@ def main(args):
             args.dataset + "_shm_shuffled_train_idx", None, None)
     dist.barrier()
     print(shm_train_nid)
-
     g["labels"][torch.isnan(g["labels"])] = 0
     g["labels"] = g["labels"].long()
-    print("start")
+
     data = shm_train_nid, metadata, g, dgl_g
 
     run(rank, world_size, data, args)
@@ -434,15 +441,18 @@ if __name__ == '__main__':
         "number of trainers participated in the compress, no greater than available GPUs num"
     )
     argparser.add_argument("--lr", type=float, default=0.003)
-    argparser.add_argument("--heads", type=str, default="4,4,1")
-    argparser.add_argument("--feat_dropout", type=float, default=0.2)
-    argparser.add_argument("--attn_dropout", type=float, default=0.2)
+    argparser.add_argument("--dropout", type=float, default=0.5)
     argparser.add_argument("--batch-size", type=int, default=1000)
-    argparser.add_argument("--batch-size-eval", type=int, default=100000)
+    argparser.add_argument("--batch-size-eval", type=int, default=1000)
     argparser.add_argument("--log-every", type=int, default=20)
     argparser.add_argument("--eval-every", type=int, default=21)
     argparser.add_argument("--fan-out", type=str, default="12,12,12")
-    argparser.add_argument("--num-hidden", type=int, default=8)
+    argparser.add_argument("--model",
+                           type=str,
+                           default="sage",
+                           choices=["sage", "gat"])
+    argparser.add_argument("--num-hidden", type=int, default=128)
+    argparser.add_argument("--num-heads", type=int, default=8)
     argparser.add_argument("--num-epochs", type=int, default=20)
     argparser.add_argument("--breakdown", action="store_true", default=False)
     argparser.add_argument("--nfeat-budget", type=float, default=0)
